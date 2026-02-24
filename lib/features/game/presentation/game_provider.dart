@@ -119,6 +119,61 @@ class GameNotifier extends StateNotifier<GameState> {
 
   void makeMove(ChessMove move) => _makeMove(move);
 
+  /// Called by Unity when a player drags a 3D piece.
+  /// [algebraic] is a move string like "e2e4" or "e7e8q" (with promotion).
+  void makeMoveFromAlgebraic(String algebraic) {
+    if (algebraic.length < 4) return;
+
+    const files = 'abcdefgh';
+    final fromFile = files.indexOf(algebraic[0]);
+    final fromRank = int.tryParse(algebraic[1]);
+    final toFile = files.indexOf(algebraic[2]);
+    final toRank = int.tryParse(algebraic[3]);
+
+    if (fromFile < 0 || fromRank == null || toFile < 0 || toRank == null) {
+      return; // Invalid move string
+    }
+
+    final fromSq = (fromRank - 1) * 8 + fromFile;
+    final toSq = (toRank - 1) * 8 + toFile;
+
+    // Parse optional promotion piece (e.g. "e7e8q")
+    PieceType? promo;
+    if (algebraic.length >= 5) {
+      switch (algebraic[4].toLowerCase()) {
+        case 'q':
+          promo = PieceType.queen;
+          break;
+        case 'r':
+          promo = PieceType.rook;
+          break;
+        case 'b':
+          promo = PieceType.bishop;
+          break;
+        case 'n':
+          promo = PieceType.knight;
+          break;
+      }
+    }
+
+    // Find the matching legal move (preserves castling / en-passant flags)
+    final allLegal = MoveGenerator.generateLegalMoves(
+      state.board,
+      state.board.turn,
+    );
+
+    final match = allLegal.where((m) {
+      if (m.from != fromSq || m.to != toSq) return false;
+      if (promo != null) return m.promotion == promo;
+      // If no promo specified, default to queen for pawn promotions
+      return m.promotion == null || m.promotion == PieceType.queen;
+    });
+
+    if (match.isNotEmpty) {
+      _makeMove(match.first);
+    }
+  }
+
   void _makeMove(ChessMove move) {
     final history = [...state.boardHistory, state.board];
     final nextBoard = MoveGenerator.applyMove(state.board, move);

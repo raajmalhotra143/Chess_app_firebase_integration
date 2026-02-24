@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:flutter_unity_widget/flutter_unity_widget.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../game/domain/board_state.dart';
 import 'game_provider.dart';
 
-class GameScreen extends ConsumerWidget {
+class GameScreen extends ConsumerStatefulWidget {
   final String mode;
   final int aiLevel;
   final String? roomId;
@@ -17,6 +18,17 @@ class GameScreen extends ConsumerWidget {
     this.aiLevel = 5,
     this.roomId,
   });
+
+  @override
+  ConsumerState<GameScreen> createState() => _GameScreenState();
+}
+
+class _GameScreenState extends ConsumerState<GameScreen> {
+  // This is your "remote control" for the 3D Unity world
+  UnityWidgetController? _unityWidgetController;
+
+  // Track the last move count to detect new moves for syncing with Unity
+  int _lastSyncedMoveCount = 0;
 
   GameMode _parseMode(String m) {
     switch (m) {
@@ -29,12 +41,79 @@ class GameScreen extends ConsumerWidget {
     }
   }
 
+  /// Send a move to the Unity 3D board so it can animate the piece.
+  /// [move] should be in algebraic notation like "e2e4".
+  void sendMoveToUnity(String move) {
+    _unityWidgetController?.postMessage(
+      'ChessGameManager', // The name of the GameObject inside Unity
+      'MovePiece',        // The name of the C# function inside Unity
+      move,               // The data you are sending (e.g., "e2e4")
+    );
+  }
+
+  /// Send a full board reset to Unity (e.g. new game / undo).
+  void sendResetToUnity() {
+    _unityWidgetController?.postMessage(
+      'ChessGameManager',
+      'ResetBoard',
+      '',
+    );
+  }
+
+  /// Send the full FEN to Unity so it can reconstruct the board.
+  void sendFenToUnity(String fen) {
+    _unityWidgetController?.postMessage(
+      'ChessGameManager',
+      'SetBoardFen',
+      fen,
+    );
+  }
+
+  /// Called when Unity sends a message back to Flutter
+  /// (e.g., the user dragged a 3D piece to a new square).
+  void _onUnityMessage(dynamic message) {
+    debugPrint('Message from Unity: $message');
+
+    // Unity sends a move string like "e2e4" when a player drags a piece.
+    // We validate it through Riverpod and apply if legal.
+    final moveStr = message.toString().trim();
+    if (moveStr.length >= 4) {
+      final gameMode = _parseMode(widget.mode);
+      final args = (gameMode, widget.aiLevel);
+      final notifier = ref.read(gameProvider(args).notifier);
+      notifier.makeMoveFromAlgebraic(moveStr);
+    }
+  }
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final gameMode = _parseMode(mode);
-    final args = (gameMode, aiLevel);
+  void dispose() {
+    _unityWidgetController?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final gameMode = _parseMode(widget.mode);
+    final args = (gameMode, widget.aiLevel);
     final gameState = ref.watch(gameProvider(args));
     final notifier = ref.read(gameProvider(args).notifier);
+
+    // Sync new moves to Unity whenever the move history grows
+    if (gameState.moveHistory.length > _lastSyncedMoveCount &&
+        _unityWidgetController != null) {
+      // Send only the latest move to Unity
+      final latestMove = gameState.moveHistory.last;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        sendMoveToUnity(latestMove.toAlgebraic());
+      });
+      _lastSyncedMoveCount = gameState.moveHistory.length;
+    } else if (gameState.moveHistory.length < _lastSyncedMoveCount) {
+      // An undo happened — resync the full board
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        sendFenToUnity(gameState.board.toFen());
+      });
+      _lastSyncedMoveCount = gameState.moveHistory.length;
+    }
 
     return Scaffold(
       backgroundColor: AppColors.bg,
@@ -44,7 +123,7 @@ class GameScreen extends ConsumerWidget {
             // Top bar
             _TopBar(
               mode: gameMode,
-              aiLevel: aiLevel,
+              aiLevel: widget.aiLevel,
               gameState: gameState,
               notifier: notifier,
             ),
@@ -52,8 +131,8 @@ class GameScreen extends ConsumerWidget {
             // Opponent info
             if (gameMode == GameMode.ai)
               _PlayerBar(
-                name: 'ChessMate AI (Lv.$aiLevel)',
-                elo: _aiElo(aiLevel),
+                name: 'ChessMate AI (Lv.${widget.aiLevel})',
+                elo: _aiElo(widget.aiLevel),
                 isBottom: false,
                 isThinking: gameState.isThinking,
               ),
@@ -61,17 +140,30 @@ class GameScreen extends ConsumerWidget {
             // Evaluation bar (AI mode)
             if (gameMode == GameMode.ai) _EvaluationBar(gameState: gameState),
 
-            // Chess board
+            // 3D Unity Chess Board
             Expanded(
               child: Center(
                 child: Padding(
                   padding: const EdgeInsets.all(AppDimens.paddingSm),
                   child: AspectRatio(
                     aspectRatio: 1,
-                    child: ChessBoardWidget(
-                      gameState: gameState,
-                      onSquareTap: notifier.selectSquare,
-                      flipBoard: gameState.isFlipped,
+                    // We replaced ChessBoardWidget with UnityWidget!
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(AppDimens.radiusSm),
+                      child: UnityWidget(
+                        onUnityCreated: (controller) {
+                          // When the 3D world loads, save the remote control
+                          _unityWidgetController = controller;
+                          _lastSyncedMoveCount = 0;
+                          // If a game is already in progress, sync the board
+                          if (gameState.moveHistory.isNotEmpty) {
+                            sendFenToUnity(gameState.board.toFen());
+                            _lastSyncedMoveCount =
+                                gameState.moveHistory.length;
+                          }
+                        },
+                        onUnityMessage: _onUnityMessage,
+                      ),
                     ),
                   ),
                 ),
@@ -79,7 +171,7 @@ class GameScreen extends ConsumerWidget {
             ),
 
             // Player info
-            const _PlayerBar(
+            _PlayerBar(
               name: 'You',
               elo: '1200',
               isBottom: true,
