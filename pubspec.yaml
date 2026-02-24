@@ -51,6 +51,7 @@ dependencies:
   # Icons
   cupertino_icons: ^1.0.8
   material_design_icons_flutter: ^7.0.7296
+  flutter_unity_widget: ^2022.2.1
 
 dev_dependencies:
   flutter_test:
