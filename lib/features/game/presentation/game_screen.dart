@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_animate/flutter_animate.dart';
-import 'package:flutter_unity_widget/flutter_unity_widget.dart';
+// import 'package:flutter_unity_widget/flutter_unity_widget.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../game/domain/board_state.dart';
@@ -25,7 +25,7 @@ class GameScreen extends ConsumerStatefulWidget {
 
 class _GameScreenState extends ConsumerState<GameScreen> {
   // This is your "remote control" for the 3D Unity world
-  UnityWidgetController? _unityWidgetController;
+  dynamic _unityWidgetController;
 
   // Track the last move count to detect new moves for syncing with Unity
   int _lastSyncedMoveCount = 0;
@@ -148,8 +148,18 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                   child: AspectRatio(
                     aspectRatio: 1,
                     // We replaced ChessBoardWidget with UnityWidget!
+                    // TODO: Uncomment UnityWidget below when you have exported the Unity project.
+                    // The build error "Project with path ':unityLibrary' could not be found" occurs
+                    // because the Unity project has not been exported to android/unityLibrary.
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(AppDimens.radiusSm),
+                      child: ChessBoardWidget(
+                        gameState: gameState,
+                        onSquareTap: (square) {
+                          notifier.selectSquare(square);
+                        },
+                      ),
+/*
                       child: UnityWidget(
                         onUnityCreated: (controller) {
                           // When the 3D world loads, save the remote control
@@ -164,6 +174,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                         },
                         onUnityMessage: _onUnityMessage,
                       ),
+*/
                     ),
                   ),
                 ),
