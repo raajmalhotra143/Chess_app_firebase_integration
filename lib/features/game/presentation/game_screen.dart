@@ -182,7 +182,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
             ),
 
             // Player info
-            _PlayerBar(
+            const _PlayerBar(
               name: 'You',
               elo: '1200',
               isBottom: true,
